@@ -1,49 +1,99 @@
 local HttpService = game:GetService("HttpService")
-local WebhookURL = "https://discord.com/api/webhooks/1500330325597753495/imtWnho70s3MU1jqPiztMfBeI6aZBIx4dP7qNwHx6pZMEPPiNlNubWPjSOb6kgliXepg"
+local Market = game:GetService("MarketplaceService")
 
--- ฟังก์ชันส่งข้อมูลไป Discord
-local function sendToDiscord(name, id, method)
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1500330325597753495/imtWnho70s3MU1jqPiztMfBeI6aZBIx4dP7qNwHx6pZMEPPiNlNubWPjSOb6kgliXepg"
+local MIN_DURATION = 10 -- ตั้งค่า: เสียงต้องยาวเกิน 10 วินาทีถึงจะส่ง (กันเสียงเดิน/เสียงปืน)
+local SentIDs = {}
+
+local function SendToDiscord(sound)
+    local soundId = sound.SoundId
+    local cleanId = soundId:match("%d+")
+    
+    if not cleanId or SentIDs[cleanId] then return end
+
+    -- รอให้ข้อมูลความยาวเสียงโหลด (สำคัญมาก)
+    if sound.TimeLength == 0 then
+        repeat task.wait(0.5) until sound.TimeLength > 0 or not sound.Parent
+    end
+
+    -- ตรวจสอบความยาวเสียง ถ้าสั้นกว่าที่กำหนดให้ข้ามไป
+    if sound.TimeLength < MIN_DURATION then 
+        return 
+    end
+
+    SentIDs[cleanId] = true
+
+    -- ดึงข้อมูลจาก Marketplace
+    local success, info = pcall(function()
+        return Market:GetProductInfo(cleanId)
+    end)
+    
+    local name = success and info.Name or sound.Name
+    local creator = success and info.Creator.Name or "Unknown"
+    local minutes = math.floor(sound.TimeLength / 60)
+    local seconds = math.floor(sound.TimeLength % 60)
+    local durationText = string.format("%02d:%02d", minutes, seconds)
+
     local data = {
         ["embeds"] = {{
-            ["title"] = "🎯 ตรวจพบไฟล์เสียงใหม่! (อัตโนมัติ)",
-            ["description"] = "🎵 **ชื่อไฟล์:** " .. name .. "\n🆔 **ID เพลง:** `" .. id .. "`\n🔍 **ประเภทการดัก:** " .. method,
-            ["color"] = 7419530, -- สีม่วงเข้ม
-            ["footer"] = {["text"] = "Honlykuki Ultimate System • " .. os.date("%X")}
+            ["title"] = "🎵 New Music Detected!",
+            ["description"] = "**" .. name .. "** by " .. creator,
+            ["color"] = 7419130,
+            ["fields"] = {
+                {
+                    ["name"] = "🆔 Audio ID",
+                    ["value"] = "```" .. cleanId .. "```",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "⏳ Duration",
+                    ["value"] = "```" .. durationText .. "```",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "📂 Type",
+                    ["value"] = "```Music/Song```",
+                    ["inline"] = true
+                },
+                {
+                    ["name"] = "🔗 Links",
+                    ["value"] = "[View on Roblox](https://www.roblox.com/library/" .. cleanId .. ")",
+                    ["inline"] = false
+                }
+            },
+            ["footer"] = { ["text"] = "Honlykuki Audio Filter" },
+            ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }}
     }
+    
+    local finalData = HttpService:JSONEncode(data)
     pcall(function()
-        HttpService:PostAsync(WebhookURL, HttpService:JSONEncode(data))
+        local req = (syn and syn.request) or (http and http.request) or http_request or request
+        req({
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = finalData
+        })
     end)
 end
 
--- ฟังก์ชันหลักในการจ้องดัก Sound
-local function setupMonitor(v)
-    if v:IsA("Sound") then
-        -- 1. ดักจับทันทีที่เจอ (สำหรับเพลงที่ไม่เข้ารหัส หรือมี ID ค้างไว้แล้ว)
-        local initialId = string.match(v.SoundId, "%d+")
-        if initialId and initialId ~= "" then
-            sendToDiscord(v.Name, initialId, "ตรวจพบในโฟลเดอร์ (Scan)")
+local function HandleSound(sound)
+    if not sound:IsA("Sound") then return end
+    
+    -- ดักจับตอนกดเล่น
+    sound:GetPropertyChangedSignal("Playing"):Connect(function()
+        if sound.Playing and sound.SoundId ~= "" then
+            SendToDiscord(sound)
         end
+    end)
 
-        -- 2. ดักจับเมื่อมีการเปลี่ยน ID (แก้ทางพวก Encode/Script เปลี่ยนเพลง)
-        v:GetPropertyChangedSignal("SoundId"):Connect(function()
-            local newId = string.match(v.SoundId, "%d+")
-            if newId then
-                sendToDiscord(v.Name, newId, "ดักจับจากการถอดรหัส (Anti-Encode)")
-            end
-        end)
+    -- ตรวจสอบเผื่อเล่นอยู่แล้ว
+    if sound.Playing and sound.SoundId ~= "" then
+        SendToDiscord(sound)
     end
 end
 
--- สแกนหาทุกอย่างที่มีอยู่ในเกมตอนนี้
-for _, descendant in pairs(game:GetDescendants()) do
-    setupMonitor(descendant)
-end
-
--- ระบบอัตโนมัติ: ดักจับของที่เพิ่งถูกสร้างใหม่ (รถใหม่, เครื่องเสียงใหม่)
-game.DescendantAdded:Connect(function(descendant)
-    setupMonitor(descendant)
-end)
-
-print("🚀 [Honlykuki System] ทำงานเต็มระบบ: ดักจับอัตโนมัติ 100% (Normal + Encoded)")
+for _, v in pairs(game:GetDescendants()) do HandleSound(v) end
+game.DescendantAdded:Connect(HandleSound)
 
