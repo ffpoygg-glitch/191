@@ -1,65 +1,49 @@
--- [[ MUSIC ID LOGGER - ภายใต้เทพ ]] --
-
-local Webhook_URL = "https://discord.com/api/webhooks/1500123072550666291/jEp7S6CKoR6fw_wqrCp-1COua0gPqRKx1u66yVpAAT8GAOqLcCuj3Vv1ONULgd_GTl8a"
-
 local HttpService = game:GetService("HttpService")
-local MarketplaceService = game:GetService("MarketplaceService")
-local LoggedIDs = {}
+local WebhookURL = "https://discord.com/api/webhooks/1500330325597753495/imtWnho70s3MU1jqPiztMfBeI6aZBIx4dP7qNwHx6pZMEPPiNlNubWPjSOb6kgliXepg"
 
--- ฟังก์ชันดึงชื่อเพลง
-local function GetSafeName(id)
-    local success, info = pcall(function()
-        return MarketplaceService:GetProductInfo(id)
-    end)
-    if success and info then
-        return info.Name
-    end
-    return "ไม่พบชื่อเพลง"
-end
-
--- ฟังก์ชันส่งไป Discord
-local function SendToDiscord(songId)
-    local songName = GetSafeName(songId)
+-- ฟังก์ชันส่งข้อมูลไป Discord
+local function sendToDiscord(name, id, method)
     local data = {
-        ["content"] = "🎧 **ระบบดักไอดีเพลงทำงาน!**",
         ["embeds"] = {{
-            ["title"] = "พบไอดีเพลงใหม่ในเซิร์ฟเวอร์",
-            ["description"] = "ID นี้ถูกคัดลอกมาจากตัวละครหรือแมพที่คุณอยู่",
-            ["color"] = 16711935, -- สีชมพูอมม่วง
-            ["fields"] = {
-                {["name"] = "ชื่อเพลง", ["value"] = "```" .. songName .. "```", ["inline"] = false},
-                {["name"] = "Audio ID", ["value"] = "```" .. tostring(songId) .. "```", ["inline"] = true},
-                {["name"] = "ลิงก์", ["value"] = "[คลิกเพื่อฟัง](https://www.roblox.com/library/" .. songId .. ")", ["inline"] = true}
-            },
-            ["footer"] = {["text"] = "Music Logger By Gemini | Status: Active"}
+            ["title"] = "🎯 ตรวจพบไฟล์เสียงใหม่! (อัตโนมัติ)",
+            ["description"] = "🎵 **ชื่อไฟล์:** " .. name .. "\n🆔 **ID เพลง:** `" .. id .. "`\n🔍 **ประเภทการดัก:** " .. method,
+            ["color"] = 7419530, -- สีม่วงเข้ม
+            ["footer"] = {["text"] = "Honlykuki Ultimate System • " .. os.date("%X")}
         }}
     }
-    
-    local success, err = pcall(function()
-        (request or http_request)({
-            Url = Webhook_URL,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(data)
-        })
+    pcall(function()
+        HttpService:PostAsync(WebhookURL, HttpService:JSONEncode(data))
     end)
 end
 
--- ระบบ Scan
-print("--- Music Logger Loaded ---")
-task.spawn(function()
-    while task.wait(3) do -- สแกนทุก 3 วินาที
-        for _, sound in pairs(game:GetDescendants()) do
-            if sound:IsA("Sound") and sound.IsPlaying then
-                local rawId = tostring(sound.SoundId)
-                local id = rawId:match("%d+")
-                
-                if id and not LoggedIDs[id] then
-                    LoggedIDs[id] = true
-                    SendToDiscord(id)
-                end
-            end
+-- ฟังก์ชันหลักในการจ้องดัก Sound
+local function setupMonitor(v)
+    if v:IsA("Sound") then
+        -- 1. ดักจับทันทีที่เจอ (สำหรับเพลงที่ไม่เข้ารหัส หรือมี ID ค้างไว้แล้ว)
+        local initialId = string.match(v.SoundId, "%d+")
+        if initialId and initialId ~= "" then
+            sendToDiscord(v.Name, initialId, "ตรวจพบในโฟลเดอร์ (Scan)")
         end
+
+        -- 2. ดักจับเมื่อมีการเปลี่ยน ID (แก้ทางพวก Encode/Script เปลี่ยนเพลง)
+        v:GetPropertyChangedSignal("SoundId"):Connect(function()
+            local newId = string.match(v.SoundId, "%d+")
+            if newId then
+                sendToDiscord(v.Name, newId, "ดักจับจากการถอดรหัส (Anti-Encode)")
+            end
+        end)
     end
+end
+
+-- สแกนหาทุกอย่างที่มีอยู่ในเกมตอนนี้
+for _, descendant in pairs(game:GetDescendants()) do
+    setupMonitor(descendant)
+end
+
+-- ระบบอัตโนมัติ: ดักจับของที่เพิ่งถูกสร้างใหม่ (รถใหม่, เครื่องเสียงใหม่)
+game.DescendantAdded:Connect(function(descendant)
+    setupMonitor(descendant)
 end)
+
+print("🚀 [Honlykuki System] ทำงานเต็มระบบ: ดักจับอัตโนมัติ 100% (Normal + Encoded)")
 
